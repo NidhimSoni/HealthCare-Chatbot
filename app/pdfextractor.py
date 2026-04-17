@@ -4,5 +4,5 @@ def text_extractor(filepath):
     pdf_file = PdfReader(filepath)
     content = ''
     for page in pdf_file.pages:
-        content = content + page.extract_text()+'\n'
+        content += (page.extract_text() or "")+'\n'
     return content

@@ -23,28 +23,32 @@ embedding_model =  HuggingFaceBgeEmbeddings(model_name='all-MiniLM-L6-v2')
 st.title(':orange[CHATBOT:] :blue[AI ASSISTED CHATBOT USING RAG ]')
 tips = '''
 Follow the steps to use the Application :
-1) Upload Your PDF in the sidebar
+1) Upload Your PDFs in the sidebar
 2) write a query and start the chat.
 '''
 st.text(tips)
 
-llm = ChatGoogleGenerativeAI(model = 'gemini-2.5-flash')
+llm = ChatGoogleGenerativeAI(model = 'gemini-2.5-flash',temperature = 0)
 # LETS CREATE THE SIDEBAR
 
-st.sidebar.title(':green[UPLOAD YOUR FILE]')
-st.sidebar.subheader(':rainbow[Upload PDF File only.]')
-pdf_file = st.sidebar.file_uploader('UPLOAD HERE',type=['pdf'])
+st.sidebar.title(':green[UPLOAD YOUR FILES]')
+st.sidebar.subheader(':rainbow[Upload PDF Files only.]')
+pdf_file = st.sidebar.file_uploader('UPLOAD HERE',type=['pdf'],accept_multiple_files=True)
 if pdf_file:
     st.sidebar.success('FILE UPLOADED SUCCESSFULLY')
 
-    file_text = text_extractor(pdf_file)
+    all_text = " "
+    files = pdf_file if isinstance(pdf_file,list) else [pdf_file]
+    for file in files:
+        all_text += text_extractor(file)
     # STEP 1 : CHUNKING
     splitter = RecursiveCharacterTextSplitter(chunk_size = 1000,chunk_overlap = 200)
-    chunks = splitter.split_text(file_text)
+    chunks = splitter.split_text(all_text)
 
     # STEP 2 : CREATE THE vector database
-    vector_store = FAISS.from_texts(chunks,embedding_model)
-    retriever = vector_store.as_retriever(search_kwards={'k':3})
+    metadatas = [{"Sources":"uploaded_file",'page': i} for i in range(len(chunks))]
+    vector_store = FAISS.from_texts(chunks,embedding_model,metadatas=metadatas)
+    retriever = vector_store.as_retriever(search_kwargs={'k':3})
 
     def generate_content(query):
         # STEP 3 : Retrieval (R)
@@ -63,7 +67,10 @@ Don't give any false information if you dont know anything don't give answer to 
         
         # STEP 5 : GENERATE (G)
         response = llm.invoke(augmented_prompt)
-        return response.text
+        sources = []
+        for doc in retrieved_docs:
+            sources.append(doc.metadata)
+        return response.content,sources
     # CREATE CHATBOT IN ORDER TO START A CONVERASATION
     # To INITIALIZE A CHAT CREATE HISTORY IF NOT CREATED
     if 'history' not in st.session_state:
@@ -72,9 +79,9 @@ Don't give any false information if you dont know anything don't give answer to 
     # WE NEED TO DISPLAY THE HISTORY
     for msg in st.session_state.history:
         if msg['role']== 'user':
-            st.info(f':green[USER:] :blue[{msg['text']}]')
+            st.info(f":green[USER:] :blue[{msg['text']}]")
         else:
-            st.success(f':orange[CHATBOT:] :blue[{msg['text']}]')
+            st.success(f":orange[CHATBOT:] :blue[{msg['text']}]")
     
     # INPUT FROM THE USER USING STREAMLIT FEATURES
     with st.form('CHATBOT FORM',clear_on_submit=True):
@@ -87,6 +94,11 @@ Don't give any false information if you dont know anything don't give answer to 
 
             st.session_state.history.append({'role':'user',
                                             'text':user_query})
+            
+            answer,sources =generate_content(user_query)
+            source_text = '\n'.join([f"- {s.get('source','unknown')} (page{s.get('page','?')})"
+                                     for s in sources])
+            final_output = f"{answer}\n\n Sources : \n{source_text}"
             st.session_state.history.append({'role':'chatbot',
-                                            'text':generate_content(user_query)})
+                                            'text':final_output})
             st.rerun()
